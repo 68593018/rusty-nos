@@ -1,42 +1,36 @@
-use tracing::info;
 use tokio::sync::mpsc;
-use tracing_subscriber::FmtSubscriber;
+use tokio::runtime::Builder; // 引入构建器
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    // 1. 初始化日志
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(tracing::Level::INFO)
-        .finish();
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("setting default subscriber failed");
+fn main() -> anyhow::Result<()> {
+    // 1. 手动构建 Tokio Runtime
+    let runtime = Builder::new_multi_thread()
+        .worker_threads(4)               // 指定启动 4 个物理工作线程 (也可不写，默认自动检测)
+        .thread_name("nos-worker")       // 【关键】设置线程名字前缀
+        .enable_all()                    // 启用 IO 和 时间驱动
+        .build()
+        .unwrap();
 
-    info!("RustyNOS Control Plane Launching...");
+    // 2. 在 Runtime 中运行我们的逻辑
+    runtime.block_on(async {
+        println!("🚀 RustyNOS 控制面启动 (PID: {})", std::process::id());
 
-    // 2. 创建 BGP -> RIB 的高速内存通道 (Internal Channel)
-    // 缓冲区大小 100，防止 RIB 处理不过来时 BGP 无限发
-    let (rib_tx, rib_rx) = mpsc::channel(100);
+        // --- 原有的业务逻辑 ---
+        let (tx, rx) = mpsc::channel(100);
 
-    // 3. 启动 RIB 组件 (消费者)
-    // 把它放到后台运行 (Green Thread)
-    let rib_handle = tokio::spawn(async move {
-        comp_ribmgr::run(rib_rx).await;
-    });
+        // 启动 RIB
+        tokio::spawn(async move {
+            comp_ribmgr::run(rx).await;
+        });
 
-    // 4. 启动 BGP 组件 (生产者)
-    // 把它放到后台运行
-    let bgp_handle = tokio::spawn(async move {
-        comp_bgp::run(rib_tx).await;
-    });
+        // 启动 BGP
+        tokio::spawn(async move {
+            comp_bgp::run(tx).await;
+        });
 
-    // 5. 等待任务结束 (实际上它们是无限循环，除非 panic)
-    // 这里我们用 select 等待任意一个退出
-    tokio::select! {
-        _ = rib_handle => info!("RIB actor exited"),
-        _ = bgp_handle => info!("BGP actor exited"),
-        _ = tokio::signal::ctrl_c() => info!("Ctrl-C received"),
-    }
+        // 挂起主线程
+        tokio::signal::ctrl_c().await
+    })?;
 
-    info!("Shutting down...");
+    println!("🛑 进程退出");
     Ok(())
 }
