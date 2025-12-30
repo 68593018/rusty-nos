@@ -1,22 +1,19 @@
+use tokio::sync::mpsc::Sender;
+use tokio::time::{self, Duration}; // 引入时间模块
+use ipnet::IpNet;
+use nos_common::internal::rib::{RibEvent, RouteProtocol};
+
 // =====================================
-// 1. 模块声明 (对应您截图里的文件夹)
+// 模块声明
 // =====================================
 pub mod packet;
 pub mod fsm;
 pub mod family;
-mod peer; // 假设 peer.rs 存在于 src 根目录
+mod peer;
 
-// =====================================
-// 2. BGP 业务逻辑
-// =====================================
-use tokio::sync::mpsc::Sender;
-use std::time::Duration;
-use ipnet::IpNet;
-use nos_common::internal::rib::{RibEvent, RouteProtocol};
-
-// 私有属性结构 (只在 BGP 内部使用)
+// 私有属性结构
 #[derive(Debug)]
-#[allow(dead_code)] // ✅ 新增这一行，忽略未使用字段的警告
+#[allow(dead_code)]
 struct BgpAttributes {
     origin: u8,
     as_path: Vec<u32>,
@@ -24,34 +21,56 @@ struct BgpAttributes {
 }
 
 pub async fn run(tx: Sender<RibEvent>) {
-    println!("🌍 BGP 组件启动 (All-in-One Mode)");
+    println!("🌍 BGP 组件启动 (Loop Mode)");
 
-    // 模拟等待 TCP 建立
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    // 模拟 BGP 建立邻居耗时
+    time::sleep(Duration::from_secs(2)).await;
+    println!("🤝 BGP Session Established with 192.168.1.1");
 
-    // 1. 模拟收到报文，解析出内部属性
-    let private_attr = BgpAttributes {
-        origin: 0,
-        as_path: vec![100, 200, 300],
-        local_pref: 100,
-    };
+    // 定义一个定时器，每 5 秒触发一次（模拟收到邻居的路由更新）
+    let mut update_interval = time::interval(Duration::from_secs(5));
     
-    let prefix: IpNet = "1.1.1.0/24".parse().unwrap();
+    // 定义一个计数器，用来修改路由属性，让每次打印不一样
+    let mut counter = 0;
 
-    println!("⚡ BGP 选路完成: {}", prefix);
-    println!("   (内部属性 AS_Path: {:?})", private_attr.as_path);
+    // 【关键点】：死循环，保证任务不退出
+    loop {
+        tokio::select! {
+            // 事件 A: 定时器响了 (模拟周期性收到路由)
+            _ = update_interval.tick() => {
+                counter += 1;
+                println!("\n--- [Tick: {}] BGP 状态机事件触发 ---", counter);
 
-    // 2. 转换为通用格式发给 RIB
-    let event = RibEvent::Update {
-        protocol: RouteProtocol::BGP,
-        prefix,
-        nexthop: "192.168.1.1".parse().unwrap(),
-        metric: 0,
-        admin_distance: 20,
-    };
+                // 1. 构造内部属性 (模拟每次 AS_Path 都在变)
+                let private_attr = BgpAttributes {
+                    origin: 0,
+                    as_path: vec![64512, 100, counter], // 每次加一个 AS 号
+                    local_pref: 100,
+                };
+                
+                let prefix: IpNet = "1.1.1.0/24".parse().unwrap();
+                println!("⚡ BGP 计算路由: {} (AS_Path: {:?})", prefix, private_attr.as_path);
 
-    println!("📤 发送路由给 RIB...");
-    if let Err(e) = tx.send(event).await {
-        println!("发送失败: {}", e);
+                // 2. 发送给 RIB
+                let event = RibEvent::Update {
+                    protocol: RouteProtocol::BGP,
+                    prefix,
+                    nexthop: "192.168.1.1".parse().unwrap(),
+                    metric: 0,
+                    admin_distance: 20,
+                };
+
+                if let Err(e) = tx.send(event).await {
+                    println!("❌ 发送失败 (可能是 RIB 挂了): {}", e);
+                    // 如果发送失败，通常意味着接收端关闭了，我们可以选择退出循环
+                    // break; 
+                } else {
+                    println!("📤 已推送到 RIB");
+                }
+            }
+
+            // 事件 B: 这里未来可以加 socket.recv() 处理 TCP 报文
+            // msg = socket.read() => { ... }
+        }
     }
 }
