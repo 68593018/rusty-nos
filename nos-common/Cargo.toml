@@ -5,5 +5,7 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-ipnet = "2.9"  # 用于 IP 前缀定义
+serde = { version = "1.0", features = ["derive"] }
+ipnet = "2.9"
+async-trait = "0.1" # ✅ 新增：支持异步 Trait
 

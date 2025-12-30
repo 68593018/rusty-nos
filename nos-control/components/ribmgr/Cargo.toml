@@ -6,4 +6,5 @@ edition = "2021"
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 nos-common = { path = "../../../nos-common" }
-
+async-trait = "0.1" # ✅ 新增
+ipnet = "2.9"
