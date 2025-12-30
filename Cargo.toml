@@ -1,0 +1,9 @@
+[workspace]
+resolver = "2"
+members = [
+    "nos-common",
+    "nos-control/launcher",
+    "nos-control/components/bgp",
+    "nos-control/components/ifmgr",
+    "nos-control/components/ribmgr",
+]

@@ -1,9 +1,9 @@
 [package]
-name = "nos-common"
+name = "comp-ribmgr"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-ipnet = "2.9"  # 用于 IP 前缀定义
+nos-common = { path = "../../../nos-common" }
 
